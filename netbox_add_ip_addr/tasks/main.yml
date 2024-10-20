@@ -1,0 +1,17 @@
+---
+# tasks file for netbox_add_ip_addr
+- name: "Add ip address of {{ vm_name }} in Netbox"
+  netbox.netbox.netbox_ip_address:
+    netbox_url: "{{ netbox_url }}"
+    netbox_token: "{{ netbox_token }}"
+    data: 
+      status: Reserved
+      address: "{{ vm_ipv4_addr }}" 
+      family: 4
+      dns_name: "{{ dns_name }}"
+      role: "VIP"
+      description: "Reserved ip address for {{ dns_name }}"      
+    state: present
+    validate_certs: false
+  register: ip_info
+  delegate_to: localhost
