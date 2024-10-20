@@ -1,0 +1,27 @@
+- name: Find files
+  ansible.builtin.find:
+    paths: "{{ path_to_hostname_dir }}"
+    recurse: yes
+    file_type: any
+  register: found_files
+
+- name: Set named.conf files list
+  set_fact:
+    named_conf_files: "{{ found_files.files | selectattr('path', 'match', '^.*\/named.conf') | list }}"
+
+- name: Check named.conf file syntax
+  ansible.builtin.shell: "named-checkconf {{ item.path }}"
+  with_items: "{{ named_conf_files }}"
+
+- name: Set DNS zones files list
+  set_fact:
+    zone_files: "{{ found_files.files | selectattr('path', 'match', '^.*\/static_zones\/.*$') | list }}"
+
+- name: Check DNS zones files syntax
+  ansible.builtin.shell:
+    cmd: >
+      find "{{ zone_files[0].path | regex_replace('\/[^\/]*$','') }}" -type f -name "*" |
+      while IFS= read -r file; do
+          named-checkzone "$(basename "$file")" "$file" || exit 1
+      done
+  when: zone_files | length > 0

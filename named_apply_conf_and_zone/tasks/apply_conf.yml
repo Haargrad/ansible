@@ -1,0 +1,62 @@
+- name: Find named.conf file
+  ansible.builtin.find:
+    paths: "{{ path_to_hostname_dir }}"
+    recurse: yes
+    file_type: "file"
+    patterns: "named.conf"
+  register: named_file_list
+
+- name: Find DNS zone files 
+  ansible.builtin.find:
+    paths: "{{ path_to_hostname_dir }}/named/static_zones"
+    recurse: yes
+    file_type: "file"
+  register: dns_zone_file_list
+
+- name: Copy named.conf to remote servers
+  ansible.builtin.copy:
+    src: "{{ named_file_list.files.0.path }}"
+    dest: "/etc/named.conf"
+    owner: named
+    group: named
+  when: named_file_list.matched > 0
+  delegate_to: '{{ dns_hostname }}'
+
+- name: Check if directory exists
+  ansible.builtin.stat:
+    path: "/etc/named/static_zones/"
+  register: directory_stat
+  delegate_to: '{{ dns_hostname }}'
+
+- name: Create backup dir
+  ansible.builtin.file:
+    path: /etc/named/static_zones_backup
+    state: directory
+    recurse: yes
+    owner: named
+    group: named
+  when: directory_stat.stat.exists    
+  delegate_to: '{{ dns_hostname }}'
+
+- name: Create backup dns zones
+  ansible.builtin.shell: "cp -pr /etc/named/static_zones/* /etc/named/static_zones_backup/"
+  when: directory_stat.stat.exists
+  delegate_to: '{{ dns_hostname }}'
+
+- name: Copy DNS zones to remote servers using rsync
+  ansible.builtin.shell: >
+    rsync --archive --compress --chown=named:named
+    -e 'ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no'
+    {{ path_to_hostname_dir }}/named/static_zones/
+    root@{{ dns_hostname }}:/etc/named/static_zones/
+  when: dns_zone_file_list.matched > 0
+
+- name: Reload dynamic dns zones 
+  ansible.builtin.shell: rndc freeze && rndc thaw
+  delegate_to: '{{ dns_hostname }}'
+
+- name: Reload named service
+  ansible.builtin.systemd:
+    name: named
+    state: reloaded
+  delegate_to: '{{ dns_hostname }}'
