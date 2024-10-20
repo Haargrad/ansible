@@ -1,0 +1,58 @@
+---
+# tasks file for vmware_scsi_to_nvme
+- name: Get UUID of VM
+  ansible.builtin.shell: cat /sys/class/dmi/id/product_serial | tr -d '[:space:]' | sed -e 's/VMware-//; s/\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{5\}\)\(.\{11\}\)/\1-\2-\3\4-\5/'
+  register: uuid
+
+- name: Get VM info from vSphere
+  community.vmware.vmware_guest_info:
+    hostname: "{{ vcenter }}"
+    username: "{{ user }}"
+    password: "{{ pass }}"
+    datacenter: "{{ datacenter }}"
+    validate_certs: false
+    uuid: "{{ uuid.stdout }}"
+  register: vm_info
+  delegate_to: localhost
+
+- name: Add nvme driver to dracut configuration
+  ansible.builtin.lineinfile:
+    path: /etc/dracut.conf.d/nvme.conf
+    line: 'add_drivers+="nvme"'
+    create: yes
+    state: present
+
+- name: Update initramfs 
+  ansible.builtin.shell: dracut -f
+
+- name: Power off the virtual machine
+  community.vmware.vmware_guest_powerstate:
+    hostname: "{{ vcenter }}"
+    username: "{{ user }}"
+    password: "{{ pass }}"
+    validate_certs: false
+    name: "{{ vm_info.instance.hw_name }}"
+    state: powered-off
+  delegate_to: localhost
+
+- name: Change scsi controller to NVMe
+  ansible.builtin.shell: "python3 {{ role_path }}/files/scsi_to_nvme.py --vm_name {{ vm_info.instance.hw_name }} --user {{ user }} --password {{ pass }} --vmware_host {{ vcenter }}"
+  delegate_to: localhost
+
+- name: Power on the virtual machine
+  community.vmware.vmware_guest_powerstate:
+    hostname: "{{ vcenter }}"
+    username: "{{ user }}"
+    password: "{{ pass }}"
+    validate_certs: false
+    name: "{{ vm_info.instance.hw_name }}"
+    state: powered-on
+  delegate_to: localhost
+
+- name: Wait for SSH to become available
+  ansible.builtin.wait_for:
+    host: "{{ inventory_hostname }}"
+    port: 22
+    delay: 10
+    timeout: 300
+  delegate_to: localhost
