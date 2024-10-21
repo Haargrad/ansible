@@ -1,0 +1,63 @@
+---
+# tasks file for yum_backup_update_yum_repolist
+- name: Collect fact about VM
+  ansible.builtin.setup:
+    gather_subset: 
+      - '!all'
+      - network
+
+- name: Determine target repo
+  set_fact:
+    target_repo: "{{ 'centos-repo.prod.domain.local' if is_prod else 'centos-repe.dev.domain.local' if is_dev }}"
+
+- name: Check if repo is install
+  shell: grep -r "{{ target_repo }}" /etc/yum.repos.d/ | grep -v repo-backup
+  ignore_errors: true
+  register: repo_install_check
+
+- name: Create directory for backup
+  file:
+    path: /etc/yum.repos.d/repo-backup
+    state: directory
+    mode: '0755'
+  when: repo_install_check.stdout == ''
+  
+- name: Move zfs repos to backup directory
+  shell: mv /etc/yum.repos.d/zfs* /etc/yum.repos.d/repo-backup/
+  ignore_errors: true
+  when: repo_install_check.stdout == ''
+
+- name: Move epel repos to backup directory
+  shell: mv /etc/yum.repos.d/epel* /etc/yum.repos.d/repo-backup/
+  ignore_errors: true
+  when: repo_install_check.stdout == ''
+
+- name: Move CentOS repos to backup directory
+  shell: mv /etc/yum.repos.d/CentOS-* /etc/yum.repos.d/repo-backup/
+  ignore_errors: true
+  when: repo_install_check.stdout == ''
+
+- name: Move zabbix repos to backup directory
+  shell: mv /etc/yum.repos.d/zabbix* /etc/yum.repos.d/repo-backup/
+  ignore_errors: true
+  when: repo_install_check.stdout == ''
+
+- name: Copy new repo files from templates
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - { src: centos-base.repo.j2, dest: /etc/yum.repos.d/centos-base.repo }
+    - { src: centos-extras.repo.j2, dest: /etc/yum.repos.d/centos-extras.repo }
+    - { src: centos-updates.repo.j2, dest: /etc/yum.repos.d/centos-updates.repo }
+    - { src: epel.repo.j2, dest: /etc/yum.repos.d/epel.repo }
+  when: repo_install_check.stdout == ''
+
+- name: Clean yum cache
+  shell: yum clean all
+
+- name: Make yum cache
+  shell: yum makecache
